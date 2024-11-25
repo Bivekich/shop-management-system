@@ -4,8 +4,8 @@ FROM node:18-alpine
 # Устанавливаем рабочую директорию в контейнере
 WORKDIR /app
 
-# Копируем package.json, package-lock.json и .npmrc
-COPY package*.json .npmrc ./
+# Копируем файлы package.json и package-lock.json
+COPY package*.json ./
 
 # Устанавливаем зависимости
 RUN npm install
