@@ -1,5 +1,5 @@
-import {NextResponse} from "next/server";
-import {PrismaClient} from "@prisma/client";
+import { NextResponse } from "next/server"
+import { PrismaClient } from "@prisma/client"
 
 const prisma = new PrismaClient()
 
@@ -9,43 +9,63 @@ export async function GET() {
             include: {
                 orderItems: {
                     include: {
-                        product: true
-                    }
-                }
-            }
-        });
+                        product: true,
+                    },
+                },
+                discount: true,
+            },
+        })
         return NextResponse.json(orders)
-    } catch (error) {
-        return NextResponse.json({error: `Ошибка при получении заказов: ${error}`}, {status: 500})
+    } catch (err) {
+        console.error("Error fetching orders:", err);
+        return NextResponse.json({ error: "Не удалось получить заказы" }, { status: 500 })
     }
 }
 
 export async function POST(request: Request) {
     try {
-        const {customerName, deliveryAddress, orderItems} = await request.json()
+        const { customerName, deliveryAddress, orderItems, discountCode } = await request.json()
+
+        // Find the discount if a code is provided
+        let discount = null
+        if (discountCode) {
+            discount = await prisma.discount.findFirst({
+                where: {
+                    code: discountCode,
+                    startDate: { lte: new Date() },
+                    endDate: { gte: new Date() },
+                },
+            })
+        }
+
         const order = await prisma.order.create({
             data: {
                 customerName,
                 deliveryAddress,
                 orderItems: {
-                    create: orderItems.map((item: {productId: number; quantity: number}) => ({
+                    create: orderItems.map((item: { productId: number; quantity: number }) => ({
                         quantity: item.quantity,
                         product: {
-                            connect: {id: item.productId}
-                        }
-                    }))
-                }
+                            connect: { id: item.productId },
+                        },
+                    })),
+                },
+                discount: discount ? { connect: { id: discount.id } } : undefined,
             },
             include: {
                 orderItems: {
                     include: {
-                        product: true
-                    }
-                }
-            }
+                        product: true,
+                    },
+                },
+                discount: true,
+            },
         })
+
         return NextResponse.json(order)
-    } catch (error) {
-        return NextResponse.json({error: `Ошибка при создании заказа: ${error}`}, {status: 500})
+    } catch (err) {
+        console.error("Error creating order:", err);
+        return NextResponse.json({ error: "Не удалось создать заказ" }, { status: 500 })
     }
 }
+

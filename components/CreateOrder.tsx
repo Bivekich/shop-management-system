@@ -14,6 +14,7 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select"
+import { useState, useEffect, useCallback } from "react";
 
 const orderSchema = z.object({
     customerName: z.string().min(1, "Имя клиента обязательно"),
@@ -24,6 +25,7 @@ const orderSchema = z.object({
             quantity: z.number().min(1, "Количество должно быть не менее 1"),
         })
     ),
+    promoCode: z.string().optional(),
 })
 
 type OrderData = z.infer<typeof orderSchema>
@@ -43,7 +45,9 @@ export default function CreateOrder() {
         handleSubmit,
         reset,
         setValue,
+        getValues,
         formState: { errors },
+        watch,
     } = useForm<OrderData>({
         resolver: zodResolver(orderSchema),
         defaultValues: {
@@ -67,6 +71,27 @@ export default function CreateOrder() {
         }
     })
 
+    const [discount, setDiscount] = useState<{ type: 'PERCENTAGE' | 'FIXED', value: number } | null>(null)
+    const [totalPrice, setTotalPrice] = useState<number>(0);
+
+    const calculateTotal = useCallback((items: { productId?: number; quantity?: number }[]) => {
+        const subtotal = items.reduce((sum, item) => {
+            if (item.productId === undefined || item.quantity === undefined) return sum;
+            const product = products?.find(p => p.id === item.productId)
+            return sum + (product?.price || 0) * item.quantity
+        }, 0)
+
+        if (discount) {
+            if (discount.type === 'PERCENTAGE') {
+                return subtotal * (1 - discount.value / 100)
+            } else {
+                return Math.max(subtotal - discount.value, 0)
+            }
+        }
+
+        return subtotal
+    }, [products, discount]);
+
     const createOrderMutation = useMutation<OrderData, Error, OrderData>({
         mutationFn: async (data: OrderData) => {
             const response = await fetch("/api/orders", {
@@ -74,7 +99,7 @@ export default function CreateOrder() {
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify(data),
+                body: JSON.stringify({ ...data, discountCode: data.promoCode }),
             })
             if (!response.ok) {
                 throw new Error("Не удалось создать заказ")
@@ -102,6 +127,52 @@ export default function CreateOrder() {
         createOrderMutation.mutate(data)
     }
 
+    const applyPromoCode = async (code: string) => {
+        try {
+            const response = await fetch(`/api/discounts/apply?code=${code}`)
+            if (response.ok) {
+                const discountData = await response.json()
+                setDiscount(discountData)
+                const items = getValues("orderItems");
+                const newTotal = calculateTotal(items);
+                setTotalPrice(newTotal);
+                toast({
+                    title: "Промокод применен",
+                    description: `Скидка ${discountData.type === 'PERCENTAGE' ? discountData.value + '%' : discountData.value + ' ₽'} применена`,
+                })
+            } else {
+                setDiscount(null)
+                const items = getValues("orderItems");
+                const newTotal = calculateTotal(items);
+                setTotalPrice(newTotal);
+                toast({
+                    title: "Ошибка",
+                    description: "Неверный промокод",
+                    variant: "destructive",
+                })
+            }
+        } catch (error) {
+            console.error("Error applying promo code:", error)
+            toast({
+                title: "Ошибка",
+                description: "Не удалось применить промокод",
+                variant: "destructive",
+            })
+        }
+    }
+
+    useEffect(() => {
+        const subscription = watch((value) => {
+            const items = value.orderItems?.filter((item): item is NonNullable<typeof item> =>
+                item !== undefined && item.productId !== undefined && item.quantity !== undefined
+            ) || [];
+            const newTotal = calculateTotal(items);
+            setTotalPrice(newTotal);
+        });
+        return () => subscription.unsubscribe();
+    }, [watch, calculateTotal]);
+
+
     return (
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <Input
@@ -124,43 +195,75 @@ export default function CreateOrder() {
                     {errors.deliveryAddress.message}
                 </p>
             )}
-            {fields.map((field, index) => (
-                <div key={field.id} className="flex space-x-2">
-                    <Select
-                        onValueChange={(value) =>
-                            setValue(`orderItems.${index}.productId`, Number(value))
-                        }
-                    >
-                        <SelectTrigger className="w-full">
-                            <SelectValue placeholder="Выберите товар" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {products?.map((product: Product) => (
-                                <SelectItem key={product.id} value={product.id.toString()}>
-                                    {product.name} - {product.price.toFixed(2)} ₽
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Input
-                        {...register(`orderItems.${index}.quantity`, {
-                            valueAsNumber: true,
-                        })}
-                        type="number"
-                        placeholder="Количество"
-                        className="w-1/3"
-                    />
-                    <Button type="button" onClick={() => remove(index)}>
-                        Удалить
-                    </Button>
-                </div>
-            ))}
-            <Button
-                type="button"
-                onClick={() => append({ productId: 0, quantity: 1 })}
-            >
-                Добавить товар
-            </Button>
+            <div className="space-y-2">
+                <h3 className="text-lg font-semibold">Товары</h3>
+                {fields.map((field, index) => (
+                    <div key={field.id} className="flex space-x-2 mb-2">
+                        <Select
+                            onValueChange={(value) => {
+                                setValue(`orderItems.${index}.productId`, Number(value));
+                                const items = getValues("orderItems");
+                                const newTotal = calculateTotal(items);
+                                setTotalPrice(newTotal);
+                            }}
+                        >
+                            <SelectTrigger className="w-full">
+                                <SelectValue placeholder="Выберите товар" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {products?.map((product: Product) => (
+                                    <SelectItem key={product.id} value={product.id.toString()}>
+                                        {product.name} - {product.price.toFixed(2)} ₽
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                        <Input
+                            {...register(`orderItems.${index}.quantity`, {
+                                valueAsNumber: true,
+                                onChange: () => {
+                                    const items = getValues("orderItems");
+                                    const newTotal = calculateTotal(items);
+                                    setTotalPrice(newTotal);
+                                },
+                            })}
+                            type="number"
+                            placeholder="Количество"
+                            className="w-1/3"
+                        />
+                        <Button type="button" onClick={() => remove(index)}>
+                            Удалить
+                        </Button>
+                    </div>
+                ))}
+                <Button
+                    type="button"
+                    onClick={() => append({ productId: 0, quantity: 1 })}
+                    className="mt-2"
+                >
+                    Добавить товар
+                </Button>
+            </div>
+            <div className="flex space-x-2">
+                <Input
+                    {...register("promoCode")}
+                    placeholder="Промокод"
+                    className="w-full"
+                />
+                <Button type="button" onClick={() => applyPromoCode(getValues("promoCode") || "")}>
+                    Применить
+                </Button>
+            </div>
+            <div className="text-right">
+                <p className="text-lg font-semibold">
+                    Итого: {totalPrice.toFixed(2)} ₽
+                </p>
+                {discount && (
+                    <p className="text-sm text-green-600">
+                        Скидка: {discount.type === 'PERCENTAGE' ? `${discount.value}%` : `${discount.value} ₽`}
+                    </p>
+                )}
+            </div>
             <Button type="submit" className="w-full">
                 Создать заказ
             </Button>

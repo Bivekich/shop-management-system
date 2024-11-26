@@ -26,6 +26,8 @@ model Order {
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
   orderItems      OrderItem[]
+  discount        Discount?   @relation(fields: [discountId], references: [id])
+  discountId      Int?
 }
 
 model OrderItem {
@@ -35,6 +37,25 @@ model OrderItem {
   quantity  Int
   order     Order   @relation(fields: [orderId], references: [id])
   product   Product @relation(fields: [productId], references: [id])
+}
+
+model Discount {
+  id        Int          @id @default(autoincrement())
+  name      String
+  type      DiscountType
+  value     Float
+  code      String?      @unique
+  startDate DateTime
+  endDate   DateTime
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  orders    Order[]
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+  COUPON
 }
 
 enum OrderStatus {

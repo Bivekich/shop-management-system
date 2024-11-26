@@ -13,6 +13,13 @@ type OrderItem = {
     };
 };
 
+type Discount = {
+    id: number;
+    name: string;
+    type: string;
+    value: number;
+};
+
 type Order = {
     id: number;
     customerName: string;
@@ -20,6 +27,7 @@ type Order = {
     orderDate: string;
     status: string;
     orderItems: OrderItem[];
+    discount: Discount | null;
 };
 
 type OrderDetailsProps = {
@@ -28,7 +36,13 @@ type OrderDetailsProps = {
 };
 
 export default function OrderDetails({ order, onClose }: OrderDetailsProps) {
-    const totalPrice = order.orderItems.reduce((sum, item) => sum + item.quantity * item.product.price, 0)
+    const subtotal = order.orderItems.reduce((sum, item) => sum + item.quantity * item.product.price, 0)
+    const discountAmount = order.discount
+        ? order.discount.type === "PERCENTAGE"
+            ? subtotal * (order.discount.value / 100)
+            : order.discount.value
+        : 0
+    const totalPrice = subtotal - discountAmount
 
     return (
         <Dialog open={true} onOpenChange={onClose}>
@@ -78,9 +92,15 @@ export default function OrderDetails({ order, onClose }: OrderDetailsProps) {
                     </TableBody>
                 </Table>
                 <DialogFooter>
-                    <div className="flex justify-between items-center w-full">
-                        <span className="font-bold">Общая сумма: {totalPrice.toFixed(2)} ₽</span>
-                        <Button onClick={onClose}>Закрыть</Button>
+                    <div className="flex flex-col items-end w-full">
+                        <span className="font-bold">Подытог: {subtotal.toFixed(2)} ₽</span>
+                        {order.discount && (
+                            <span className="text-green-600">
+                Скидка ({order.discount.name}): -{discountAmount.toFixed(2)} ₽
+              </span>
+                        )}
+                        <span className="font-bold text-lg">Общая сумма: {totalPrice.toFixed(2)} ₽</span>
+                        <Button onClick={onClose} className="mt-2">Закрыть</Button>
                     </div>
                 </DialogFooter>
             </DialogContent>
